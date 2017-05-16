@@ -7,17 +7,6 @@ import logging
 from logging.config import dictConfig
 
 config = ConfigParser.SafeConfigParser()
-config.read('settings.cfg')
-
-# setting globals - refer to settings.ini for notes and definitions
-CMC_BASEURL = config.get('coinmarketcap', 'baseurl')
-CMC_MAX_CALLS_PER_MINUTE = int(config.get('coinmarketcap', 'max_calls_per_minute'))
-CM_CURRENCY = config.get('cryptomon', 'default_currency')
-CM_WATCH_PRICE = config.get('cryptomon', 'default_watch_price')
-CM_WATCH_DIRECTION = config.get('cryptomon', 'default_direction')
-PROWL_API = config.get('prowl', 'api_key')
-PROWL_PRIO = config.get('prowl', 'defaul_priority')
-PROWL_BASEURL = config.get('prowl', 'baseurl')
 
 # init logging
 # logging.getLogger("urllib3").setLevel(logging.DEBUG)
@@ -47,15 +36,12 @@ logging_config = dict(
 
 dictConfig(logging_config)
 logger = logging.getLogger('cryptomon')
-#urllib_logger = logging.getLogger("urllib3")
-#urllib_logger.setLevel(logging.DEBUG)
-# urllib_logger = urllib3.add_stderr_logger()
-# urllib_logger.setLevel(logging.DEBUG)
 
 # create parser
 parser = argparse.ArgumentParser()
 parser.add_argument("-c", "--currency", help="currency name [ethereum, bitcoin]")
 parser.add_argument("-v", "--verbose", action="store_true", help="enable verbose output")
+parser.add_argument("--config", help="path to config file")
 parser.add_argument("direction", help="specify [rise,drop] to specified price")
 parser.add_argument("price", help="price to monitor for currency")
 
@@ -66,13 +52,26 @@ args = parser.parse_args()
 #     logging.error("Please specify only either 'rise' or 'fall' as the price direction.")
 #     sys.exit(1)
 
-CM_WATCH_DIRECTION = args.direction.lower()
-
 if args.verbose:
     logger.setLevel(logging.DEBUG)
     logger.debug("Parser args: " + str(args))
 else:
     logger.setLevel(logging.INFO)
+
+if args.config:
+    pass
+else:
+    config.read('settings.cfg')
+# setting globals - refer to settings.ini for notes and definitions
+CMC_BASEURL = config.get('coinmarketcap', 'baseurl')
+CMC_MAX_CALLS_PER_MINUTE = int(config.get('coinmarketcap', 'max_calls_per_minute'))
+CM_CURRENCY = config.get('cryptomon', 'default_currency')
+CM_WATCH_PRICE = config.get('cryptomon', 'default_watch_price')
+CM_WATCH_DIRECTION = config.get('cryptomon', 'default_direction')
+# logger.debug("CM_WATCH_DIRECTION: {0}".format(CM_WATCH_DIRECTION))
+PROWL_API = config.get('prowl', 'api_key')
+PROWL_PRIO = config.get('prowl', 'defaul_priority')
+PROWL_BASEURL = config.get('prowl', 'baseurl')
 
 if args.currency:
     logger.debug("Changing CM_CURRENCY to {0}".format(args.currency))
@@ -80,6 +79,8 @@ if args.currency:
 
 CM_WATCH_PRICE = args.price
 logger.debug("Watching {0} for a price of ${1}".format(CM_CURRENCY, CM_WATCH_PRICE))
+
+CM_WATCH_DIRECTION = args.direction.lower()
 
 urllib3.disable_warnings()
 logger.debug("Disabled urllib3 SSL warnings.")
@@ -91,14 +92,12 @@ def pushAlert(price, msg):
 
     logger.info("Sending notification to Prowl...")
     event_time = time.strftime("%m/%d/%y %H:%M:%S")
-    # event_time=event_time.replace(' ', '%20') # replace spaces with URL chars
 
     event_title = '{0}'.format(CM_CURRENCY.capitalize())
     if CM_WATCH_DIRECTION == 'rise':
         event_title = event_title + ' exceeded target!'
     else:
         event_title = event_title + ' fell below target!'
-    # event_title = event_title.replace(' ', '%20')
 
     try:
         logger.debug("Opening connection to Prowl API...")
@@ -118,7 +117,7 @@ def pushAlert(price, msg):
         xmldoc = minidom.parseString(req.data)
         err_nodes = xmldoc.getElementsByTagName('error')
         if len(err_nodes) > 0: # error XML tag found in response
-            err_node = err_nodes[0] # there's only ever 1 in their response XML
+            err_node = err_nodes[0] # there's only ever 1 in the response XML
             err_code = err_node.getAttribute('code')
             err_msg = err_node.firstChild.nodeValue
             logger.error("Prowl API Error: {0} - {1}".format(err_code, err_msg))
