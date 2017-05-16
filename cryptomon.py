@@ -7,11 +7,11 @@ import logging
 from logging.config import dictConfig
 
 config = ConfigParser.SafeConfigParser()
-config.read('settings.ini')
+config.read('settings.cfg')
 
 # setting globals - refer to settings.ini for notes and definitions
 CMC_BASEURL = config.get('coinmarketcap', 'baseurl')
-CMC_MAX_CALLS_PER_MINUTE = config.get('coinmarketcap', 'max_calls_per_minute')
+CMC_MAX_CALLS_PER_MINUTE = int(config.get('coinmarketcap', 'max_calls_per_minute'))
 CM_CURRENCY = config.get('cryptomon', 'default_currency')
 CM_WATCH_PRICE = config.get('cryptomon', 'default_watch_price')
 CM_WATCH_DIRECTION = config.get('cryptomon', 'default_direction')

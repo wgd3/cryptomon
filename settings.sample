@@ -1,16 +1,16 @@
 [coinmarketcap]
-baseurl = 'https://api.coinmarketcap.com/v1'
+baseurl = https://api.coinmarketcap.com/v1
 max_calls_per_minute = 2
 
 [prowl]
 # Prowl API settings - http://prowl.weks.net/api.php
 # Set Prowl API key
-api_key = ""
+api_key =
 # Set Prowl priority. 0 - Normal, 2 - Emergency, -2 - Very Low
-default_priority = "0"
-baseurl = "https://prowl.weks.net/publicapi/add?"
+default_priority = 0
+baseurl = https://prowl.weks.net/publicapi/add?
 
 [cryptomon]
-default_currency = 'ethereum'
+default_currency = ethereum
 default_watch_price = 0
-default_direction = 'rise'
+default_direction = rise
