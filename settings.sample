@@ -13,4 +13,5 @@ baseurl = https://prowl.weks.net/publicapi/add?
 [cryptomon]
 default_currency = ethereum
 default_watch_price = 0
-default_direction = rise
+# default_range is the default +/- dollar range from the price at time of execution
+default_range = 4

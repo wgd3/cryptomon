@@ -9,7 +9,7 @@ from logging.config import dictConfig
 config = ConfigParser.SafeConfigParser()
 
 # init logging
-# logging.getLogger("urllib3").setLevel(logging.DEBUG)
+# logging.getLogger("urllib3").setLevel(logger.debug)
 # TODO Fix urllib3 logging
 
 logging_config = dict(
@@ -42,15 +42,9 @@ parser = argparse.ArgumentParser()
 parser.add_argument("-c", "--currency", help="currency name [ethereum, bitcoin]")
 parser.add_argument("-v", "--verbose", action="store_true", help="enable verbose output")
 parser.add_argument("--config", help="path to config file")
-parser.add_argument("direction", help="specify [rise,drop] to specified price")
-parser.add_argument("price", help="price to monitor for currency")
+parser.add_argument("-r", "--range", help="+/- dollar range from current price")
 
 args = parser.parse_args()
-
-# TODO validate args.direction
-# if args.direction.lower != 'rise' and args.direction.lower != 'drop':
-#     logging.error("Please specify only either 'rise' or 'fall' as the price direction.")
-#     sys.exit(1)
 
 if args.verbose:
     logger.setLevel(logging.DEBUG)
@@ -58,32 +52,35 @@ if args.verbose:
 else:
     logger.setLevel(logging.INFO)
 
+# must be read/set before configuring global variables
 if args.config:
-    pass
+    pass # TODO add custom settings file handling
 else:
     config.read('settings.cfg')
+
 # setting globals - refer to settings.ini for notes and definitions
 CMC_BASEURL = config.get('coinmarketcap', 'baseurl')
 CMC_MAX_CALLS_PER_MINUTE = int(config.get('coinmarketcap', 'max_calls_per_minute'))
 CM_CURRENCY = config.get('cryptomon', 'default_currency')
 CM_WATCH_PRICE = config.get('cryptomon', 'default_watch_price')
-CM_WATCH_DIRECTION = config.get('cryptomon', 'default_direction')
-# logger.debug("CM_WATCH_DIRECTION: {0}".format(CM_WATCH_DIRECTION))
+CM_PRICE_RANGE = float(config.get('cryptomon', 'default_range'))
 PROWL_API = config.get('prowl', 'api_key')
 PROWL_PRIO = config.get('prowl', 'defaul_priority')
 PROWL_BASEURL = config.get('prowl', 'baseurl')
 
+# the following globals only get updated if they are overriden by parsed arguments
 if args.currency:
     logger.debug("Changing CM_CURRENCY to {0}".format(args.currency))
     CM_CURRENCY = args.currency.lower()
 
-CM_WATCH_PRICE = args.price
-logger.debug("Watching {0} for a price of ${1}".format(CM_CURRENCY, CM_WATCH_PRICE))
+if args.range:
+    CM_PRICE_RANGE = float(args.range)
 
-CM_WATCH_DIRECTION = args.direction.lower()
-
+# unsafe HTTPS handling
 urllib3.disable_warnings()
 logger.debug("Disabled urllib3 SSL warnings.")
+
+# initialize urllib3 manager
 http = urllib3.PoolManager()
 logger.debug("Initilized urllib3 PoolManager.")
 
@@ -129,44 +126,66 @@ def pushAlert(price, msg):
         logger.debug("urllib3 Exception: {0}".format(str(e)))
         logger.error("Error sending push notification.")
 
+def cmcRequest(currency):
+    """Dedicated method for urllib3 request
+
+    # TODO update docstring
+    """
+    logger.debug("cmcRequest called for {0}".format(currency))
+
+    try:
+        req = http.request(
+            'GET',
+            CMC_BASEURL + '/ticker/' + currency + '/',
+            fields={'convert': 'USD'}
+        )
+        return req
+    except urllib3.exceptions.NewConnectionError as e:
+        logger.error("NewConnectionError: {0}".format(str(e)))
+
+    return False
+
+def getCurrentPrice(currency):
+    """Method for returning the current asking price"""
+    logger.debug("getCurrentPrice called")
+
+    resp = cmcRequest(currency)
+    resp_data = json.loads(resp.data)[0]
+    return resp_data['price_usd']
+
 def main():
+
+    CM_START_PRICE = float(getCurrentPrice(CM_CURRENCY))
+    CM_HIGH_PRICE = CM_START_PRICE + CM_PRICE_RANGE
+    CM_LOW_PRICE = CM_START_PRICE - CM_PRICE_RANGE
+    logger.debug("Found CM_START_PRICE of ${0}".format(CM_START_PRICE))
+    logger.info("Starting main loop, watching for prices above {0} and below {1}".format(CM_HIGH_PRICE, CM_LOW_PRICE))
 
     while True:
 
-        logger.info("Checking prices...")
+        current_price = getCurrentPrice(CM_CURRENCY)
 
-        try:
-            req = http.request(
-                'GET',
-                CMC_BASEURL + '/ticker/ethereum/',
-                fields={'convert': 'USD'}
-            )
-        except urllib3.exceptions.NewConnectionError as e:
-            logger.error("NewConnectionError: {0}".format(str(e)))
+        logger.debug("Comparing current ${0} >= ${1}".format(current_price, CM_HIGH_PRICE))
+        comp = float(current_price) >= float(CM_HIGH_PRICE)
+        logger.debug("Comparison: {0}".format(comp))
+        if float(current_price) >= float(CM_HIGH_PRICE):
+            logger.debug("Current currency price ${0} exceeds target ${1}".format(current_price, CM_HIGH_PRICE))
+            logger.info("Currency price (${0}) has risen above your target!".format(current_price))
+            # DO SOMETHING
+            pushAlert(current_price, "Price triggered at {0}".format(current_price))
+            sys.exit(0)
 
-        eth_data = json.loads(req.data)[0]
-        current_price = eth_data['price_usd']
-        logger.info("ETHUSD = ${0}".format(current_price))
+        logger.debug("Comparing current ${0} <= ${1}".format(current_price, CM_LOW_PRICE))
+        comp = float(current_price) <= float(CM_LOW_PRICE)
+        logger.debug("Comparison: {0}".format(comp))
+        if float(current_price) <= float(CM_LOW_PRICE):
+            logger.debug("Current currency price ${0} dropped below target ${1}".format(current_price, CM_LOW_PRICE))
+            logger.info("Currency price (${0}) has dropped below your target!".format(current_price))
+            # DO SOMETHING
+            pushAlert(current_price, "Price triggered at {0}".format(current_price))
+            sys.exit(0)
 
-        # evaluate price based on watch price
-        if CM_WATCH_DIRECTION == 'rise':
-            # logger.debug("Looking for higher price...")
-            if float(current_price) >= float(CM_WATCH_PRICE):
-                logger.debug("Current currency price ${0} exceeds target ${1}".format(current_price, CM_WATCH_PRICE))
-                logger.info("Currency price (${0}) has risen above your target!".format(current_price))
-                # DO SOMETHING
-                pushAlert(current_price, "Price triggered at {0}".format(current_price))
-                sys.exit(0)
-        else: # looking for lower price
-            # logger.debug("Looking for lower price...")
-            if float(current_price) <= float(CM_WATCH_PRICE):
-                logger.debug("Current currency price ${0} dropped below target ${1}".format(current_price, CM_WATCH_PRICE))
-                logger.info("Currency price (${0}) has dropped below your target!".format(current_price))
-                # DO SOMETHING
-                pushAlert(current_price, "Price triggered at {0}".format(current_price))
-                sys.exit(0)
-
-        logger.debug("Currency price (${0}) has not yet met target of ${1}.".format(current_price, CM_WATCH_PRICE))
+        logger.debug("Currency price (${0}) has not yet met range of ${1} - ${2}.".format(current_price, CM_LOW_PRICE, CM_HIGH_PRICE))
 
         count = 0
         while count < (60 / CMC_MAX_CALLS_PER_MINUTE):
