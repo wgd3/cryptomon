@@ -6,6 +6,8 @@ from xml.dom import minidom
 import logging
 from logging.config import dictConfig
 
+from api import ExchangeAPI
+
 config = ConfigParser.SafeConfigParser()
 
 # init logging
@@ -57,6 +59,9 @@ if args.config:
     pass # TODO add custom settings file handling
 else:
     config.read('settings.cfg')
+
+# create list containing all exchanges
+AVAIL_EXCHANGES = []
 
 # setting globals - refer to settings.ini for notes and definitions
 CMC_BASEURL = config.get('coinmarketcap', 'baseurl')
@@ -153,6 +158,47 @@ def getCurrentPrice(currency):
     resp_data = json.loads(resp.data)[0]
     return resp_data['price_usd']
 
+def getAllExchangeAskingPrices(currency):
+    """Method for returning the current asking price from all exchanges"""
+    logger.debug("getAllExchangeAskingPrices called")
+
+    prices = []
+
+    # check to see if we're using eth or btc
+    for ex in AVAIL_EXCHANGES:
+        exPrice = ex.getUsdVal(currency)
+        logger.debug("Adding asking price of ${0} from the {1} exchange for {2}".format(exPrice, ex.exchange_name, currency))
+        prices.append(exPrice)
+
+
+def createExchanges():
+    logger.debug("Started to build exchange objects...")
+
+    try:
+        exchanges = config.get('exchanges', 'supported_exchanges').split(',')
+        logger.debug("Found the following exchanges: " + str(exchanges))
+
+        for exchange in exchanges:
+            # logger.debug("Finding configuration for {0} exchange".format(exchange))
+            curExchangeName = config.get(exchange, 'name')
+            curExchangeUrl = config.get(exchange, 'base_url')
+            curExchangeMaxRequests = config.get(exchange, 'max_requests_per_minute')
+
+            newExchange = ExchangeAPI(curExchangeName, curExchangeUrl, curExchangeMaxRequests)
+            for cur_pair in config.get(exchange, 'supported_currencies').split(','):
+                newExchange.addSupportedCurrency(cur_pair)
+            newExchange.setUsdValEndpoint(config.get(exchange, 'usd_val_endpoint'))
+
+            AVAIL_EXCHANGES.append(newExchange)
+            logger.debug("Added {0} exchange to available exchanges".format(curExchangeName))
+
+    except ConfigParser.NoSectionError as e:
+        logger.error("Could not find config section: {0}".format(str(e)))
+    except ConfigParser.NoOptionError as e:
+        logger.error("Could not find config option: {0}".format(str(e)))
+    except ConfigParser.Error as e:
+        logger.error("Config file error: {0}".format(str(e)))
+
 def main():
 
     CM_START_PRICE = float(getCurrentPrice(CM_CURRENCY))
@@ -201,4 +247,5 @@ if __name__ == '__main__':
     logger.debug("Monitoring currency: {0}".format(CM_CURRENCY))
     logger.debug("Update interval: {0}s".format(60 / CMC_MAX_CALLS_PER_MINUTE))
 
+    createExchanges()
     main()

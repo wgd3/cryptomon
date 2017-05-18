@@ -15,3 +15,16 @@ default_currency = ethereum
 default_watch_price = 0
 # default_range is the default +/- dollar range from the price at time of execution
 default_range = 4
+
+[exchanges]
+supported_exchanges = gemini, coinbase
+
+[gemini]
+name = gemini
+base_url = https://api.gemini.com/v1/
+max_requests_per_minute = 30
+
+[coinbase]
+name = coinbase
+base_url = https://api.coinbase.com/v2/
+max_requests_per_minute = 10
