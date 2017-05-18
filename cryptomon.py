@@ -19,7 +19,7 @@ logging_config = dict(
     version = 1,
     formatters = {
         'f': {'format':
-              '%(asctime)s|%(name)-25s|%(levelname)-5s| %(message)s',
+              '%(asctime)s | %(name)-25s | %(levelname)-5s | %(message)s',
               'datefmt': '%m/%d/%Y %I:%M:%S'}
         },
     handlers = {
@@ -97,10 +97,6 @@ def pushAlert(price, msg):
     event_time = time.strftime("%m/%d/%y %H:%M:%S")
 
     event_title = '{0}'.format(CM_CURRENCY.capitalize())
-    # if CM_WATCH_DIRECTION == 'rise':
-    #     event_title = event_title + ' exceeded target!'
-    # else:
-    #     event_title = event_title + ' fell below target!'
 
     try:
         logger.debug("Opening connection to Prowl API...")
@@ -162,11 +158,14 @@ def getCurrentPrice(currency):
     return resp_data['price_usd']
 
 def getByDotNotation( obj, ref ):
-    """Use dot notation to refer to an arbitrary depth within a JSON object"""
+    """Use dot notation to refer to an arbitrary depth within a JSON object
+
+    http://www.velvetcache.org/2012/03/13/addressing-nested-dictionaries-in-python
+    """
     val = obj
     for key in ref.split( '.' ):
         val = val[key]
-        return val
+    return val
 
 def getAllExchangeAskingPrices(currency):
     """Method for returning the current asking price from all exchanges"""
@@ -183,20 +182,8 @@ def getAllExchangeAskingPrices(currency):
         if currency == 'ethereum':
             currency_symbol = config.get(exDict['name'], 'ethereum_symbol')
 
-        # translate currency pair
-        # cur_pairs = ex.getSupportedCurrencies()
-        # exchangeDebugMsg(exDict['name'], "cur_pairs: {0}".format(cur_pairs))
-
-        # for index, cp in enumerate(cur_pairs, start=0):
-        #     exchangeDebugMsg(exDict['name'], "Checking for {0} at index {1} in cur_pairs".format(cp, index))
-        #     if currency in cp: # checking lower case
-        #         exchangeDebugMsg(exDict['name'], "Found matching symbol of {0}".format(cp))
-        #         exDict['price'] = ex.getUsdVal(cur_pairs[index])
-        #     if currency in cp.lower(): # convert upper case symbols and check
-        #         exchangeDebugMsg(exDict['name'], "Found matching symbol of {0}".format(cp))
-        #         exDict['price'] = ex.getUsdVal(cur_pairs[index])
-
         price_data = ex.getUsdVal(currency_symbol)
+        # exchangeDebugMsg(ex.exchange_name, "price_data: {0}".format(price_data))
         # logger.debug("getByDotNotation price: {0}".format(getByDotNotation(price_data, config.get(ex.exchange_name, 'response_dict_path'))))
 
         exDict['price'] = getByDotNotation(price_data, config.get(ex.exchange_name, 'response_dict_path'))
@@ -205,6 +192,19 @@ def getAllExchangeAskingPrices(currency):
 
     return prices
 
+def getAskingPrice(exchange, currency):
+    logger.debug("getAskingPrice for the {0} exchange".format(exchange.exchange_name))
+
+    # lookup symbol
+    currency_symbol = ''
+    if currency == 'ethereum':
+        currency_symbol = config.get(exchange.exchange_name, 'ethereum_symbol')
+
+    price_data = exchange.getUsdVal(currency_symbol)
+    asking_price = getByDotNotation(price_data, config.get(exchange.exchange_name, 'response_dict_path'))
+    logger.debug("found asking price of {0}".format(asking_price))
+
+    return asking_price
 
 def exchangeDebugMsg(exchange, msg):
     logger.debug("{0} - {1}".format(colored(exchange.capitalize(), 'green'), msg))
@@ -242,9 +242,6 @@ def createExchanges():
             AVAIL_EXCHANGES.append(newExchange)
             logger.debug("Added {0} exchange to available exchanges".format(curExchangeName))
 
-        for ex in exchanges:
-            exchangeDebugMsg(config.get(ex, 'name'), config.get(ex, 'supported_currencies').split(','))
-
     except ConfigParser.NoSectionError as e:
         logger.error("Could not find config section: {0}".format(str(e)))
     except ConfigParser.NoOptionError as e:
@@ -253,48 +250,78 @@ def createExchanges():
         logger.error("Config file error: {0}".format(str(e)))
 
 def main():
+    """
+    This loop should find the initial ask price for all exchanges, then
+    set up a dict like so:
+    {
+        'gemini' : {
+            'starting' : '90.543',
+        },
+        'coinbase' : {
+            'starting' : '90.786',
+        }
+    }
+    """
 
-    CM_START_PRICE = float(getCurrentPrice(CM_CURRENCY))
-    CM_HIGH_PRICE = CM_START_PRICE + CM_PRICE_RANGE
-    CM_LOW_PRICE = CM_START_PRICE - CM_PRICE_RANGE
-    logger.debug("Found CM_START_PRICE of ${0}".format(CM_START_PRICE))
-    logger.info("Starting main loop, watching for prices above {0} and below {1}".format(CM_HIGH_PRICE, CM_LOW_PRICE))
+    exchange_prices = {}
+
+    # find starting prices
+    current_prices = getAllExchangeAskingPrices(CM_CURRENCY)
+    for ex in current_prices:
+        exchange_prices[ex['name']] = {}
+        exchange_prices[ex['name']]['starting'] = ex['price']
+
+    logger.debug("exchange_prices: {0}".format(str(exchange_prices)))
+
+    # establish wait times
+    max_request_times = []
+    logger.debug("exchange_prices keys: {0}".format(exchange_prices.keys()))
+    for ex in exchange_prices.keys():
+        logger.debug("Checking max requests per minute for {0} exchange".format(ex))
+        new_wait_time = config.get(ex, 'max_requests_per_minute')
+        logger.debug("Found {0} as the wait time for the {1} exchange".format(new_wait_time, ex))
+        max_request_times.append(new_wait_time)
+    # set the max requests per minute to the lowest number
+    logger.debug("Evaluating requests per minute: {0}".format(max_request_times))
+    max_requests_per_minute = int(min(max_request_times))
+    logger.debug("Chose {0} as the max requests per minute".format(max_requests_per_minute))
 
     while True:
 
-        current_price = getCurrentPrice(CM_CURRENCY)
-        current_prices = getAllExchangeAskingPrices(CM_CURRENCY)
+        logger.info("Looking up the latest prices ***********************************************")
 
-        for exchange in current_prices:
-            exchangeDebugMsg(exchange['name'], "Evaluating current ask price of {0}".format(exchange['price']))
+        for ex in AVAIL_EXCHANGES:
+            exchangeDebugMsg(ex.exchange_name, "Evaluating current ask price of {0}".format(exchange_prices[ex.exchange_name]['starting']))
+            asking_price = getAskingPrice(ex, CM_CURRENCY)
+
+            exchange_high_price = float(exchange_prices[ex.exchange_name]['starting']) + float(CM_PRICE_RANGE)
+            exchange_low_price = float(exchange_prices[ex.exchange_name]['starting']) - float(CM_PRICE_RANGE)
+
+            logger.debug("Comparing current ${0} >= ${1}".format(asking_price, exchange_high_price))
+            comp = float(asking_price) >= float(exchange_high_price)
+            logger.debug("Comparison: {0}".format(comp))
+            if float(asking_price) >= float(exchange_high_price):
+
+                logger.debug("Current currency price ${0} exceeds target ${1}".format(asking_price, exchange_high_price))
+                logger.info("Currency price (${0}) has risen above your target!".format(asking_price))
+                pushAlert(asking_price, "Price triggered at {0}".format(asking_price))
+                sys.exit(0)
 
 
+            logger.debug("Comparing current ${0} <= ${1}".format(asking_price, exchange_low_price))
+            comp = float(asking_price) <= float(exchange_low_price)
+            logger.debug("Comparison: {0}".format(comp))
+            if float(asking_price) <= float(exchange_low_price):
+                logger.debug("Current currency price ${0} dropped below target ${1}".format(asking_price, exchange_low_price))
+                logger.info("Currency price (${0}) has dropped below your target!".format(asking_price))
+                pushAlert(asking_price, "Price triggered at {0}".format(asking_price))
+                sys.exit(0)
 
-        logger.debug("Comparing current ${0} >= ${1}".format(current_price, CM_HIGH_PRICE))
-        comp = float(current_price) >= float(CM_HIGH_PRICE)
-        logger.debug("Comparison: {0}".format(comp))
-        if float(current_price) >= float(CM_HIGH_PRICE):
-            logger.debug("Current currency price ${0} exceeds target ${1}".format(current_price, CM_HIGH_PRICE))
-            logger.info("Currency price (${0}) has risen above your target!".format(current_price))
-            # DO SOMETHING
-            pushAlert(current_price, "Price triggered at {0}".format(current_price))
-            sys.exit(0)
-
-        logger.debug("Comparing current ${0} <= ${1}".format(current_price, CM_LOW_PRICE))
-        comp = float(current_price) <= float(CM_LOW_PRICE)
-        logger.debug("Comparison: {0}".format(comp))
-        if float(current_price) <= float(CM_LOW_PRICE):
-            logger.debug("Current currency price ${0} dropped below target ${1}".format(current_price, CM_LOW_PRICE))
-            logger.info("Currency price (${0}) has dropped below your target!".format(current_price))
-            # DO SOMETHING
-            pushAlert(current_price, "Price triggered at {0}".format(current_price))
-            sys.exit(0)
-
-        logger.info("Currency price (${0}) has not yet met range of ${1} - ${2}.".format(current_price, CM_LOW_PRICE, CM_HIGH_PRICE))
+            logger.info("Currency price (${0}) on {1} has not yet met range of ${2} - ${3}.".format(asking_price, colored(ex.exchange_name, 'green'), exchange_low_price, exchange_high_price))
 
         count = 0
-        while count < (60 / CMC_MAX_CALLS_PER_MINUTE):
-            sys.stdout.write('Waiting {0} seconds...\r'.format((60 / CMC_MAX_CALLS_PER_MINUTE) - count))
+        while count < (60 / max_requests_per_minute):
+            sys.stdout.write('Waiting {0} seconds...\r'.format((60 / max_requests_per_minute) - count))
             sys.stdout.flush()
             count += 1
             time.sleep(1)
@@ -303,8 +330,6 @@ def main():
 if __name__ == '__main__':
 
     logger.debug("Starting cryptomon program")
-    logger.debug("Monitoring currency: {0}".format(CM_CURRENCY))
-    logger.debug("Update interval: {0}s".format(60 / CMC_MAX_CALLS_PER_MINUTE))
 
     createExchanges()
     main()
