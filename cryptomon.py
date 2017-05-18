@@ -2,6 +2,7 @@
 import sys, urllib3, time, json
 import argparse, ConfigParser
 from xml.dom import minidom
+from termcolor import colored
 
 import logging
 from logging.config import dictConfig
@@ -18,7 +19,7 @@ logging_config = dict(
     version = 1,
     formatters = {
         'f': {'format':
-              '%(asctime)s|%(name)-9s|%(levelname)-5s| %(message)s',
+              '%(asctime)s|%(name)-25s|%(levelname)-5s| %(message)s',
               'datefmt': '%m/%d/%Y %I:%M:%S'}
         },
     handlers = {
@@ -96,10 +97,10 @@ def pushAlert(price, msg):
     event_time = time.strftime("%m/%d/%y %H:%M:%S")
 
     event_title = '{0}'.format(CM_CURRENCY.capitalize())
-    if CM_WATCH_DIRECTION == 'rise':
-        event_title = event_title + ' exceeded target!'
-    else:
-        event_title = event_title + ' fell below target!'
+    # if CM_WATCH_DIRECTION == 'rise':
+    #     event_title = event_title + ' exceeded target!'
+    # else:
+    #     event_title = event_title + ' fell below target!'
 
     try:
         logger.debug("Opening connection to Prowl API...")
@@ -124,8 +125,10 @@ def pushAlert(price, msg):
             err_msg = err_node.firstChild.nodeValue
             logger.error("Prowl API Error: {0} - {1}".format(err_code, err_msg))
         else:
-            pass
-            # TODO Add debug output to show remaining API calls on Prowl
+            # if there's no error node, then it's a success node, and there's only one
+            success_node = xmldoc.getElementsByTagName('success')[0]
+            remaining_calls = success_node.getAttribute('remaining')
+            logger.debug("Your API key for Prowl has {0} API calls remaining".format(remaining_calls))
 
     except Exception as e:
         logger.debug("urllib3 Exception: {0}".format(str(e)))
@@ -136,7 +139,7 @@ def cmcRequest(currency):
 
     # TODO update docstring
     """
-    logger.debug("cmcRequest called for {0}".format(currency))
+    # logger.debug("cmcRequest called for {0}".format(currency))
 
     try:
         req = http.request(
@@ -152,23 +155,59 @@ def cmcRequest(currency):
 
 def getCurrentPrice(currency):
     """Method for returning the current asking price"""
-    logger.debug("getCurrentPrice called")
+    # logger.debug("getCurrentPrice called")
 
     resp = cmcRequest(currency)
     resp_data = json.loads(resp.data)[0]
     return resp_data['price_usd']
 
+def getByDotNotation( obj, ref ):
+    """Use dot notation to refer to an arbitrary depth within a JSON object"""
+    val = obj
+    for key in ref.split( '.' ):
+        val = val[key]
+        return val
+
 def getAllExchangeAskingPrices(currency):
     """Method for returning the current asking price from all exchanges"""
-    logger.debug("getAllExchangeAskingPrices called")
+    # logger.debug("getAllExchangeAskingPrices called")
 
     prices = []
 
-    # check to see if we're using eth or btc
     for ex in AVAIL_EXCHANGES:
-        exPrice = ex.getUsdVal(currency)
-        logger.debug("Adding asking price of ${0} from the {1} exchange for {2}".format(exPrice, ex.exchange_name, currency))
-        prices.append(exPrice)
+        exDict = {}
+        exDict['name'] = ex.exchange_name
+
+        # lookup symbol
+        currency_symbol = ''
+        if currency == 'ethereum':
+            currency_symbol = config.get(exDict['name'], 'ethereum_symbol')
+
+        # translate currency pair
+        # cur_pairs = ex.getSupportedCurrencies()
+        # exchangeDebugMsg(exDict['name'], "cur_pairs: {0}".format(cur_pairs))
+
+        # for index, cp in enumerate(cur_pairs, start=0):
+        #     exchangeDebugMsg(exDict['name'], "Checking for {0} at index {1} in cur_pairs".format(cp, index))
+        #     if currency in cp: # checking lower case
+        #         exchangeDebugMsg(exDict['name'], "Found matching symbol of {0}".format(cp))
+        #         exDict['price'] = ex.getUsdVal(cur_pairs[index])
+        #     if currency in cp.lower(): # convert upper case symbols and check
+        #         exchangeDebugMsg(exDict['name'], "Found matching symbol of {0}".format(cp))
+        #         exDict['price'] = ex.getUsdVal(cur_pairs[index])
+
+        price_data = ex.getUsdVal(currency_symbol)
+        # logger.debug("getByDotNotation price: {0}".format(getByDotNotation(price_data, config.get(ex.exchange_name, 'response_dict_path'))))
+
+        exDict['price'] = getByDotNotation(price_data, config.get(ex.exchange_name, 'response_dict_path'))
+        logger.debug("Adding asking price of ${0} from the {1} exchange for {2}".format(exDict['price'], ex.exchange_name, currency_symbol))
+        prices.append(exDict)
+
+    return prices
+
+
+def exchangeDebugMsg(exchange, msg):
+    logger.debug("{0} - {1}".format(colored(exchange.capitalize(), 'green'), msg))
 
 
 def createExchanges():
@@ -183,14 +222,28 @@ def createExchanges():
             curExchangeName = config.get(exchange, 'name')
             curExchangeUrl = config.get(exchange, 'base_url')
             curExchangeMaxRequests = config.get(exchange, 'max_requests_per_minute')
+            curExchangeCurrencies = config.get(exchange, 'supported_currencies').split(',')
+            exchangeDebugMsg(curExchangeName, curExchangeCurrencies)
 
+            # create the ExchangeAPI object
             newExchange = ExchangeAPI(curExchangeName, curExchangeUrl, curExchangeMaxRequests)
-            for cur_pair in config.get(exchange, 'supported_currencies').split(','):
+            # exchangeDebugMsg(curExchangeName, "Created ExchangeAPI object: {0}".format(newExchange.__str__()))
+
+            # configure the new ExchangeAPI object
+            # logger.debug("Adding these currencies to the exchange: {0}".format(curExchangeCurrencies))
+            for cur_pair in curExchangeCurrencies:
+                exchangeDebugMsg(curExchangeName, "Adding {0} to supported currencies".format(cur_pair))
                 newExchange.addSupportedCurrency(cur_pair)
+
+            # exchangeDebugMsg(curExchangeName, "cur_pairs: {0}".format(newExchange.getSupportedCurrencies()))
+
             newExchange.setUsdValEndpoint(config.get(exchange, 'usd_val_endpoint'))
 
             AVAIL_EXCHANGES.append(newExchange)
             logger.debug("Added {0} exchange to available exchanges".format(curExchangeName))
+
+        for ex in exchanges:
+            exchangeDebugMsg(config.get(ex, 'name'), config.get(ex, 'supported_currencies').split(','))
 
     except ConfigParser.NoSectionError as e:
         logger.error("Could not find config section: {0}".format(str(e)))
@@ -210,6 +263,12 @@ def main():
     while True:
 
         current_price = getCurrentPrice(CM_CURRENCY)
+        current_prices = getAllExchangeAskingPrices(CM_CURRENCY)
+
+        for exchange in current_prices:
+            exchangeDebugMsg(exchange['name'], "Evaluating current ask price of {0}".format(exchange['price']))
+
+
 
         logger.debug("Comparing current ${0} >= ${1}".format(current_price, CM_HIGH_PRICE))
         comp = float(current_price) >= float(CM_HIGH_PRICE)
@@ -231,7 +290,7 @@ def main():
             pushAlert(current_price, "Price triggered at {0}".format(current_price))
             sys.exit(0)
 
-        logger.debug("Currency price (${0}) has not yet met range of ${1} - ${2}.".format(current_price, CM_LOW_PRICE, CM_HIGH_PRICE))
+        logger.info("Currency price (${0}) has not yet met range of ${1} - ${2}.".format(current_price, CM_LOW_PRICE, CM_HIGH_PRICE))
 
         count = 0
         while count < (60 / CMC_MAX_CALLS_PER_MINUTE):
