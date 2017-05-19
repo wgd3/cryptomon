@@ -17,14 +17,22 @@ default_watch_price = 0
 default_range = 4
 
 [exchanges]
-supported_exchanges = gemini, coinbase
+supported_exchanges = gemini,coinbase
 
 [gemini]
 name = gemini
 base_url = https://api.gemini.com/v1/
 max_requests_per_minute = 30
+usd_val_endpoint = pubticker/CUR_PAIR
+response_dict_path = ask
+supported_currencies = ethereum,bitcoin
+ethereum_symbol = ethusd
 
 [coinbase]
 name = coinbase
 base_url = https://api.coinbase.com/v2/
 max_requests_per_minute = 10
+usd_val_endpoint = prices/CUR_PAIR/buy
+response_dict_path = data.amount
+supported_currencies = ethereum,bitcoin
+ethereum_symbol = ETH-USD

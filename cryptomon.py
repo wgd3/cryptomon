@@ -304,7 +304,7 @@ def main():
 
                 logger.debug("Current currency price ${0} exceeds target ${1}".format(asking_price, exchange_high_price))
                 logger.info("Currency price (${0}) has risen above your target!".format(asking_price))
-                pushAlert(asking_price, "Price triggered at {0}".format(asking_price))
+                pushAlert(asking_price, "Price triggered at {0} on {1}".format(asking_price, ex.exchange_name))
                 sys.exit(0)
 
 
@@ -314,7 +314,7 @@ def main():
             if float(asking_price) <= float(exchange_low_price):
                 logger.debug("Current currency price ${0} dropped below target ${1}".format(asking_price, exchange_low_price))
                 logger.info("Currency price (${0}) has dropped below your target!".format(asking_price))
-                pushAlert(asking_price, "Price triggered at {0}".format(asking_price))
+                pushAlert(asking_price, "Price triggered at {0} on {1}".format(asking_price, ex.exchange_name))
                 sys.exit(0)
 
             logger.info("Currency price (${0}) on {1} has not yet met range of ${2} - ${3}.".format(asking_price, colored(ex.exchange_name, 'green'), exchange_low_price, exchange_high_price))
